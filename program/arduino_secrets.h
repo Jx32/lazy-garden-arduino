@@ -1,0 +1,2 @@
+#define SECRET_SSID "SC_B3F8_2.4G"
+#define SECRET_PASS "EYEG4WUbSJ"

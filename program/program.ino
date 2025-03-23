@@ -22,12 +22,17 @@ String getDeviceResponse = "";
 // Irrigation configuration
 long activationSeconds = 120;
 long irrigateSeconds = 120;
-long configurationCheckSeconds = 120;
+long configurationCheckSeconds = 3600;
 
 // Counter
 long activationSecondsCounter = 0;
 long irrigationSecondsCounter = 0;
 long configurationCheckCounter = 0;
+
+#define WIFI_PIN 0
+#define OPEN_VALVE_PIN 1
+#define VALVE_PIN 3
+#define TICK_PIN 2
 
 void resetActionCounters() {
   activationSecondsCounter = 0;
@@ -37,7 +42,14 @@ void resetActionCounters() {
 
 void setup() {
   Serial.begin(9600);
-  while (!Serial);
+  //while (!Serial);
+
+  pinMode(WIFI_PIN, OUTPUT);
+  pinMode(OPEN_VALVE_PIN, OUTPUT);
+  pinMode(TICK_PIN, OUTPUT);
+  pinMode(VALVE_PIN, OUTPUT);
+
+  digitalWrite(TICK_PIN, LOW);
 
   reconnectToWifi();
 
@@ -49,6 +61,8 @@ void setup() {
 
 void reconnectToWifi() {
   status = WiFi.status();
+
+  digitalWrite(WIFI_PIN, LOW);
 
   while(status != WL_CONNECTED) {
     Serial.print("Attempting to connect to network: ");
@@ -62,6 +76,8 @@ void reconnectToWifi() {
     // Wait for connection
     delay(10000);
   }
+
+  digitalWrite(WIFI_PIN, HIGH);
 }
 
 void checkForIrrigationEnablement() {
@@ -94,7 +110,10 @@ void loop() {
 
     readGetDevice();
   } else {
-    delay(1000);
+    digitalWrite(TICK_PIN, HIGH);
+    delay(500);
+    digitalWrite(TICK_PIN, LOW);
+    delay(500);
 
     ++configurationCheckCounter;
     if (checkForConfigurationCheck()) {
@@ -229,10 +248,12 @@ void updateConfiguration(JsonDocument serverDeviceDoc) {
     }
 }
 
-void closeValve(String message, bool notifyAPI) {
+void -closeValve(String message, bool notifyAPI) {
   // TODO: Send signal to close the water valve
   resetActionCounters();
   isIrrigating = false;
+  digitalWrite(OPEN_VALVE_PIN, LOW);
+  digitalWrite(VALVE_PIN, LOW);
    
   // Update device using the API
   if (notifyAPI) {
@@ -241,6 +262,8 @@ void closeValve(String message, bool notifyAPI) {
 }
 
 void openValve() {
+  digitalWrite(OPEN_VALVE_PIN, HIGH);
+  digitalWrite(VALVE_PIN, HIGH);
   // Update device using the API
   patchLastUpdate("Irrigating your plants", "IRRIGATING");
 
