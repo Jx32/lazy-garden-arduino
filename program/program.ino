@@ -36,18 +36,10 @@ long activationSecondsCounter = 0;
 long irrigationSecondsCounter = 0;
 long configurationCheckCounter = 0;
 
-/*
-Original ones
 #define WIFI_PIN 0
 #define OPEN_VALVE_PIN 1
 #define VALVE_PIN 3
 #define TICK_PIN 2
-*/
-
-#define WIFI_PIN 3
-#define OPEN_VALVE_PIN 2
-#define VALVE_PIN 5
-#define TICK_PIN 4
 
 void setup() {
   //Serial.begin(9600);
@@ -58,9 +50,6 @@ void setup() {
   pinMode(TICK_PIN, OUTPUT);
   pinMode(VALVE_PIN, OUTPUT);
 
-  digitalWrite(TICK_PIN, LOW);
-
-  digitalWrite(OPEN_VALVE_PIN, HIGH);
   digitalWrite(TICK_PIN, HIGH);
 
   reconnectToWifi();
@@ -68,9 +57,6 @@ void setup() {
   Serial.println("You're connected to the network");
 
   getDevice();
-
-  digitalWrite(OPEN_VALVE_PIN, LOW);
-  digitalWrite(TICK_PIN, LOW);
 }
 
 void reconnectToWifi() {
