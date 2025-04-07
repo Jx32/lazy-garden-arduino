@@ -368,7 +368,7 @@ void patchLastUpdate(String description, String key) {
   // TODO: Call API to patch error message and add last update date
 
   if (client.connectSSL(server, 443)) {
-    String body = "{\"deviceId\": \"" + deviceId + "\", \"key\": \"" + key + "\", \"description\": \"" + description + "\"}";
+    String body = "{\"deviceId\": \"" + deviceId + "\", \"key\": \"" + key + "\", \"description\": \"" + description + "\", \"signalStrength\": " + String(WiFi.RSSI()) + "}";
 
     Serial.println("Connected to server");
     // Make the HTTP request
