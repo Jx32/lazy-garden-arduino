@@ -20,12 +20,6 @@ bool isIrrigating = false;
 bool waitingForGetDeviceResponse = false;
 String getDeviceResponse = "";
 
-bool waitingForPatchDeviceResponse = false;
-String patchDeviceDescription = "";
-String patchDeviceKey = "";
-
-bool waitingForActivationSync = false;
-
 // Irrigation configuration
 long activationSeconds = 120;
 long irrigateSeconds = 120;
@@ -110,14 +104,6 @@ void loop() {
 
     readGetDevice();
 
-  } else if (waitingForPatchDeviceResponse) {
-
-    readPatchLastUpdate();
-
-  } else if (waitingForActivationSync) {
-
-    readSyncActivationCounter();
-
   } else {
     digitalWrite(TICK_PIN, HIGH);
     delay(500);
@@ -152,88 +138,6 @@ void resetActivationSecondsCounterOnMidnight() {
   }
 }
 
-void readPatchLastUpdate () {
-  while (client.available()) {
-      String responseLine = client.readStringUntil('\n');
-      
-      if (responseLine.indexOf("HTTP/1.1") > -1) {
-        client.stop();
-        waitingForPatchDeviceResponse = false;
-
-        if (!isRequestOk(responseLine)) {
-          Serial.println("Invalid Patch device HTTP code: " + responseLine);
-          patchLastUpdate(patchDeviceDescription, patchDeviceKey);
-        } else if (!isIrrigating) {
-          // Resync activation counter
-          syncActivationCounter();
-        }
-      }
-  }
-}
-
-void readSyncActivationCounter () {
-  while (client.available()) {
-      String responseLine = client.readStringUntil('\n');
-      //Serial.println(responseLine);
-      
-      if (responseLine.indexOf("HTTP/1.1") > -1) {
-        waitingForActivationSync = false;
-
-        if (!isRequestOk(responseLine)) {
-          Serial.println("Invalid sync activation counter HTTP code: " + responseLine);
-          delay(5000);
-          syncActivationCounter();
-        }
-      }
-
-      if (responseLine.indexOf("{") > -1) {
-        JsonDocument doc;
-        
-        // Deserialize the JSON document
-        DeserializationError error = deserializeJson(doc, responseLine);
-
-        if (error) {
-          Serial.println("Invalid sync activation JSON deserialization error - " + responseLine);
-          delay(5000);
-          waitingForActivationSync = false;
-          syncActivationCounter();
-        } else {
-          activationSecondsCounter = doc["seconds"].as<long>();
-
-          Serial.println("Activation synced to " + String(activationSecondsCounter) + " sec.");
-          waitingForActivationSync = false;
-          client.stop();
-        }
-      }
-  }
-}
-
-void syncActivationCounter () {
-  reconnectToWifi();
-
-  waitingForActivationSync = false;
-
-  if (client.connected()) {
-    client.stop();
-  }
-
-  if (client.connectSSL(server, 443)) {
-    Serial.println("Connected to server");
-    // Make the HTTP request
-    client.println("GET /api/v1/sync-time HTTP/1.1");
-    client.println("Host: lazy-garden-api.onrender.com");
-    client.println("Connection: close");
-    client.println();
-    Serial.println("Sync activation counter Request sent");
-
-    waitingForActivationSync = true; // Tell arduino to catch the data
-  } else {
-    Serial.println("Cannot connect to the server, retrying");
-    client.stop();
-    syncActivationCounter();
-  }
-}
-
 void getDevice() {
   reconnectToWifi();
 
@@ -265,47 +169,65 @@ void getDevice() {
 
 void readGetDevice() {
   if (client.available()) {
-    char c = client.read();
+    //char c = client.read();
     
     // Just process line by lines
-    if ((int) c == 10 || (int) c == 13) {
+    //if ((int) c == 10 || (int) c == 13) {
 
       //Serial.println(getDeviceResponse);
 
+      getDeviceResponse = client.readStringUntil('\n');
+
       if (waitingForGetDeviceResponse && getDeviceResponse.indexOf("HTTP/1.1") > -1 && !isRequestOk(getDeviceResponse)) {
         // Wrong requests causes to stop fetching the configuration
-        waitingForGetDeviceResponse = false;
-        client.stop();
-        Serial.println("Cannot get the device configuration due to " + getDeviceResponse + " retrying");
-        getDevice();
+        retryGetDevice(getDeviceResponse);
         return;
       }
 
-      JsonDocument doc;
-      
-      // Deserialize the JSON document
-      DeserializationError error = deserializeJson(doc, getDeviceResponse);
-
       // Test if parsing succeeds.
-      if (error) {
-        //Serial.print(F("deserializeJson() failed: "));
-        //Serial.println(error.f_str());
-      } else if (getDeviceResponse.indexOf("{") > -1) { // Ensure that the line contains a JSON object
-        if (waitingForGetDeviceResponse) {
+      if (getDeviceResponse.indexOf("{") > -1) { // Ensure that the line contains a JSON object
           //Serial.print("Get Device Response: ");
           //Serial.println(getDeviceResponse);
 
-          waitingForGetDeviceResponse = false;
+        JsonDocument doc;
+        
+        // Deserialize the JSON document
+        DeserializationError error = deserializeJson(doc, getDeviceResponse);
 
-          updateConfiguration(doc);
+        if (error) {
+          // Wrong JSON
+          retryGetDevice(getDeviceResponse);
+          return;
         }
+
+        waitingForGetDeviceResponse = false;
+
+        updateConfiguration(doc);
+
+      } else if (getDeviceResponse.indexOf("sync") > -1) {
+
+        Serial.println(getDeviceResponse);
+        Serial.println(getDeviceResponse.substring(6));
+
+        String secondsSinceMidnight = getDeviceResponse.substring(6);
+        activationSecondsCounter = secondsSinceMidnight.toInt();
+
+        Serial.println("Synced activation seconds counter: " + String(activationSecondsCounter));
       }
 
       getDeviceResponse = "";
-    }
+    //}
 
-    getDeviceResponse += c;
+    //getDeviceResponse += c;
   }
+}
+
+void retryGetDevice(String response) {
+  waitingForGetDeviceResponse = false;
+  client.stop();
+  Serial.println("Cannot get the device configuration due to " + response + " retrying");
+  delay(5000);
+  getDevice();
 }
 
 bool isRequestOk(String responseCodeLine) {
@@ -329,8 +251,6 @@ void updateConfiguration(JsonDocument serverDeviceDoc) {
 
     if (updateMessage != "") {
       closeValve(updateMessage, true);
-    } else {
-      syncActivationCounter();
     }
 }
 
@@ -339,59 +259,12 @@ void closeValve(String message, bool notifyAPI) {
   isIrrigating = false;
   digitalWrite(OPEN_VALVE_PIN, LOW);
   digitalWrite(VALVE_PIN, LOW);
-   
-  // Update device using the API
-  if (notifyAPI) {
-    patchLastUpdate(message, "CLOSED");
-  }
 }
 
 void openValve() {
   digitalWrite(OPEN_VALVE_PIN, HIGH);
   digitalWrite(VALVE_PIN, HIGH);
   isIrrigating = true;
-
-  // Update device using the API
-  patchLastUpdate("Irrigating your plants", "IRRIGATION_STATUS");
-}
-
-void patchLastUpdate(String description, String key) {
-  reconnectToWifi();
-
-  waitingForPatchDeviceResponse = false;
-
-  if (client.connected()) {
-    client.stop();
-  }
-
-  Serial.println("Posting history with description: " + description + " and key: " + key);
-  // TODO: Call API to patch error message and add last update date
-
-  if (client.connectSSL(server, 443)) {
-    String body = "{\"deviceId\": \"" + deviceId + "\", \"key\": \"" + key + "\", \"description\": \"" + description + "\", \"signalStrength\": " + String(WiFi.RSSI()) + "}";
-
-    Serial.println("Connected to server");
-    // Make the HTTP request
-    client.println("POST /api/v1/device/" + deviceId + "/history HTTP/1.1");
-    client.println("Host: lazy-garden-api.onrender.com");
-    client.println("Connection: close");
-    client.println("Content-Type: application/json");
-    client.print("Content-Length: ");
-    client.println(body.length());
-    client.println();
-    client.println(body);
-    Serial.println("Post history Request sent with body " + body);
-
-    waitingForPatchDeviceResponse = true;
-
-    // Put backup data in case of any retry
-    patchDeviceDescription = description;
-    patchDeviceKey = key;
-  } else {
-    Serial.println("Cannot connect to the server, retrying");
-    client.stop();
-    patchLastUpdate(description, key);
-  }
 }
 
 /*void printData() {
